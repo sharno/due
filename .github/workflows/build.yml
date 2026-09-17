@@ -8,6 +8,17 @@ on:
       - "v*"
   pull_request:
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish the installable debug APK to GitHub Releases
+        required: false
+        default: false
+        type: boolean
+      release_tag:
+        description: Existing tag to publish (for example v1.0.0)
+        required: false
+        default: v1.0.0
+        type: string
 
 permissions:
   contents: read
@@ -20,6 +31,8 @@ jobs:
   build:
     name: Build release APK
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
 
     steps:
       - name: Check out source
@@ -52,6 +65,17 @@ jobs:
           --no-daemon --console=plain
           :app:assembleRelease :app:lintRelease
 
+      - name: Build installable debug APK
+        run: >-
+          nix develop --accept-flake-config -c gradle
+          --no-daemon --console=plain
+          :app:assembleDebug :app:lintDebug
+
+      - name: Prepare installable APK
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk due-debug.apk
+          sha256sum due-debug.apk | tee due-debug.apk.sha256
+
       - name: Scan APK with F-Droid
         run: >-
           nix develop --accept-flake-config -c fdroid scanner
@@ -70,3 +94,26 @@ jobs:
           path: |
             app/build/outputs/apk/release/app-release-unsigned.apk
             app/build/outputs/apk/release/app-release-unsigned.apk.sha256
+            due-debug.apk
+            due-debug.apk.sha256
+
+      - name: Publish installable APK to GitHub Release
+        if: >-
+          startsWith(github.ref, 'refs/tags/v') ||
+          (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.release_tag }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" due-debug.apk due-debug.apk.sha256 --clobber
+          else
+            gh release create "$RELEASE_TAG" \
+              --verify-tag \
+              --title "Due $RELEASE_TAG" \
+              --notes "Installable CI debug build of Due for testing. This APK is debug-signed and is not the F-Droid release artifact." \
+              due-debug.apk \
+              due-debug.apk.sha256
+          fi
