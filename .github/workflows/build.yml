@@ -1,0 +1,72 @@
+name: Build Android APK
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build release APK
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Enable Nix binary cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Cache Gradle dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle.properties', 'flake.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Validate Nix flake
+        run: nix flake check
+
+      - name: Build and lint release APK
+        run: >-
+          nix develop --accept-flake-config -c gradle
+          --no-daemon --console=plain
+          :app:assembleRelease :app:lintRelease
+
+      - name: Scan APK with F-Droid
+        run: >-
+          nix develop --accept-flake-config -c fdroid scanner
+          --exit-code app/build/outputs/apk/release/app-release-unsigned.apk
+
+      - name: Write APK checksum
+        run: >-
+          sha256sum app/build/outputs/apk/release/app-release-unsigned.apk
+          | tee app/build/outputs/apk/release/app-release-unsigned.apk.sha256
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: due-release-apk-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            app/build/outputs/apk/release/app-release-unsigned.apk
+            app/build/outputs/apk/release/app-release-unsigned.apk.sha256
