@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Due</string>
+    <string name="overdue_channel_name">Overdue tasks</string>
+    <string name="overdue_channel_description">Tasks that are due and still need to be completed.</string>
+</resources>

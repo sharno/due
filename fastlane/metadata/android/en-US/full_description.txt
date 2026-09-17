@@ -1,0 +1,14 @@
+Due is a deliberately small, offline todo list.
+
+Every todo has a required date and time, which default to today and now. When an unfinished todo becomes due, Due keeps a persistent notification visible with the outstanding work until it is completed.
+
+Features:
+
+• Create, complete, and delete todos
+• Required due date and time
+• Persistent notifications for overdue work
+• One-tap completion from the notification
+• Restores reminders after reboot and time or time-zone changes
+• No account, ads, analytics, tracking, or network connection
+
+Due stores all todos only on your device.

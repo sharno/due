@@ -1,0 +1,6 @@
+# Keep source and F-Droid metadata byte-stable across development platforms.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.apk binary
