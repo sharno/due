@@ -1,5 +1,6 @@
 package dev.sharno.due
 
+import android.annotation.SuppressLint
 import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -18,25 +19,57 @@ import java.time.format.DateTimeFormatter
 object TaskScheduler {
     const val ACTION_TASK_DUE = "dev.sharno.due.TASK_DUE"
     const val ACTION_COMPLETE_TASK = "dev.sharno.due.COMPLETE_TASK"
+    const val ACTION_NOTIFICATION_DISMISSED = "dev.sharno.due.NOTIFICATION_DISMISSED"
+    const val ACTION_WATCHDOG = "dev.sharno.due.WATCHDOG"
     const val EXTRA_TASK_ID = "task_id"
 
     private const val CHANNEL_ID = "overdue_tasks"
     private const val NOTIFICATION_ID = 7
+    private const val WATCHDOG_REQUEST_CODE = 1
+    private const val WATCHDOG_INTERVAL_MILLIS = 15 * 60 * 1000L
     private val dueTimeFormatter = DateTimeFormatter.ofPattern("EEE, MMM d · HH:mm")
 
     fun synchronize(context: Context, todos: List<Todo>) {
+        val now = System.currentTimeMillis()
         todos.filterNot(Todo::completed).forEach { todo ->
-            if (todo.dueAtMillis > System.currentTimeMillis()) {
+            if (todo.dueAtMillis > now) {
                 schedule(context, todo)
             } else {
                 cancelAlarm(context, todo.id)
             }
         }
-        updateOverdueNotification(context, todos)
+
+        val overdue = todos
+            .asSequence()
+            .filterNot(Todo::completed)
+            .filter { it.dueAtMillis <= now }
+            .sortedBy(Todo::dueAtMillis)
+            .toList()
+
+        updateOverdueNotification(context, overdue)
+        if (overdue.isNotEmpty() && canPostNotifications(context)) {
+            scheduleWatchdog(context)
+        } else {
+            cancelWatchdog(context)
+        }
     }
 
     fun cancelAlarm(context: Context, taskId: String) {
         alarmManager(context).cancel(duePendingIntent(context, taskId))
+    }
+
+    private fun scheduleWatchdog(context: Context) {
+        // This is deliberately inexact: the due alarm is precise, while this
+        // only repairs a notification that System UI or an OEM removed.
+        alarmManager(context).setAndAllowWhileIdle(
+            AlarmManager.RTC_WAKEUP,
+            System.currentTimeMillis() + WATCHDOG_INTERVAL_MILLIS,
+            watchdogPendingIntent(context),
+        )
+    }
+
+    private fun cancelWatchdog(context: Context) {
+        alarmManager(context).cancel(watchdogPendingIntent(context))
     }
 
     private fun schedule(context: Context, todo: Todo) {
@@ -50,22 +83,12 @@ object TaskScheduler {
         }
     }
 
-    private fun updateOverdueNotification(context: Context, todos: List<Todo>) {
-        if (
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) !=
-                android.content.pm.PackageManager.PERMISSION_GRANTED
-        ) {
+    @SuppressLint("MissingPermission")
+    private fun updateOverdueNotification(context: Context, overdue: List<Todo>) {
+        if (!canPostNotifications(context)) {
             NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
             return
         }
-
-        val overdue = todos
-            .asSequence()
-            .filterNot(Todo::completed)
-            .filter { it.dueAtMillis <= System.currentTimeMillis() }
-            .sortedBy(Todo::dueAtMillis)
-            .toList()
 
         if (overdue.isEmpty()) {
             NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
@@ -85,6 +108,9 @@ object TaskScheduler {
                     .setSummaryText("Complete tasks to clear this reminder"),
             )
             .setContentIntent(openAppPendingIntent(context))
+            // Some Android versions allow users to swipe ongoing reminders.
+            // Re-post immediately when that explicit dismissal happens.
+            .setDeleteIntent(notificationDismissedPendingIntent(context))
             .addAction(
                 android.R.drawable.checkbox_on_background,
                 "Complete first",
@@ -122,6 +148,27 @@ object TaskScheduler {
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
+    private fun canPostNotifications(context: Context): Boolean {
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS,
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            return false
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = context.getSystemService(NotificationManager::class.java)
+                .getNotificationChannel(CHANNEL_ID)
+            if (channel?.importance == NotificationManager.IMPORTANCE_NONE) return false
+        }
+
+        return true
+    }
+
     private fun alarmManager(context: Context): AlarmManager =
         context.getSystemService(AlarmManager::class.java)
 
@@ -141,6 +188,24 @@ object TaskScheduler {
             .setAction(ACTION_COMPLETE_TASK)
             .setData(Uri.parse("complete://task/$taskId"))
             .putExtra(EXTRA_TASK_ID, taskId),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
+    private fun notificationDismissedPendingIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(
+        context,
+        NOTIFICATION_ID,
+        Intent(context, TodoAlarmReceiver::class.java)
+            .setAction(ACTION_NOTIFICATION_DISMISSED)
+            .setData(Uri.parse("due://notification/dismissed")),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
+    private fun watchdogPendingIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(
+        context,
+        WATCHDOG_REQUEST_CODE,
+        Intent(context, TodoAlarmReceiver::class.java)
+            .setAction(ACTION_WATCHDOG)
+            .setData(Uri.parse("due://notification/watchdog")),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
