@@ -1,73 +1,56 @@
 # F-Droid release checklist
 
-This project contains upstream Fastlane metadata in
-`fastlane/metadata/android/en-US/`. It deliberately does not contain an F-Droid
-build recipe yet: that recipe must reference an immutable commit from the public
-upstream repository.
+Due is ready for an F-Droid submission. Its copy-ready initial build recipe is
+[`fdroid-metadata/dev.sharno.due.yml`](fdroid-metadata/dev.sharno.due.yml).
+F-Droid's build metadata belongs in its separate `fdroiddata` repository, not
+in this app's source repository; this copy makes the submission reviewable
+before it is proposed upstream.
 
-## Preconditions
+## Completed readiness work
 
-- Choose and add a FLOSS license in `LICENSE`.
-- Publish the complete source history to a public Git repository.
-- Capture and commit a 512×512 PNG icon and at least one phone screenshot under
-  `fastlane/metadata/android/en-US/images/`. These are needed for a polished
-  listing and for F-Droid's Latest tab eligibility.
-- Test notification behaviour on a physical Android device.
+- GPL-3.0-or-later source license.
+- Public, tagged source release: [`v1.0.0`](https://github.com/sharno/due/tree/v1.0.0).
+- Upstream Fastlane title, descriptions, changelog, and 512×512 PNG icon.
+- Offline-only source with no account, ads, analytics, tracking, network
+  service, proprietary SDK, or bundled binary dependency.
+- Release APK builds from the pinned Nix toolchain and passes F-Droid's APK
+  scanner.
+- Clean release builds are byte-for-byte identical locally.
+- AGP VCS metadata and generated vector PNGs are disabled for release
+  reproducibility.
 
-## Release
+## Still required before submitting
 
-1. Build the release APK from a clean checkout with:
+- Test core todo and notification behaviour on at least one physical Android
+  device.
+- Capture and commit at least one genuine phone screenshot to
+  `fastlane/metadata/android/en-US/images/phoneScreenshots/`. This is needed
+  for F-Droid's Latest-tab listing criteria.
+- Generate, securely back up, and protect a long-lived Android release signing
+  key. Build and publish a developer-signed `v1.0.0` APK if you want F-Droid
+  to verify and distribute the APK with your own signing identity. F-Droid can
+  instead sign its own build, so this does not block the initial submission.
 
-   ```sh
-   nix develop -c gradle :app:assembleRelease
-   ```
+## Submit the initial recipe
 
-2. Increment `versionCode` and `versionName` in `app/build.gradle.kts`, update
-   `fastlane/metadata/android/en-US/changelogs/<versionCode>.txt`, commit, and
-   create an annotated release tag such as `v1.0.0`.
-3. Publish the source repository and the developer-signed release APK. Keep the
-   signing key stable for every future release.
-4. Fork `https://gitlab.com/fdroid/fdroiddata`, add
-   `metadata/dev.sharno.due.yml`, run `fdroid lint` and the CI build, then open a
-   `New App: Due` merge request.
+1. Fork <https://gitlab.com/fdroid/fdroiddata> and create a branch.
+2. Copy `fdroid-metadata/dev.sharno.due.yml` to
+   `metadata/dev.sharno.due.yml` in that fork.
+3. Run `fdroid lint dev.sharno.due` and the fork's CI build. Address any
+   review/CI feedback; the recipe deliberately uses the immutable 40-character
+   release commit rather than a mutable tag.
+4. Open a `New App: Due` merge request against F-Droid's `master` branch.
+5. Respond to review questions and wait for the build cycle. After acceptance,
+   F-Droid builds, signs (unless verified upstream signing is configured), and
+   publishes the APK.
 
-## Initial fdroiddata recipe
+## Future releases
 
-After the public repository and `v1.0.0` tag exist, use the tag's full commit
-hash rather than the tag name:
-
-```yaml
-Categories:
-  - Time
-License: <SPDX-license-id>
-AuthorName: Mohamed Elsharnouby
-AuthorEmail: sharnoby3@gmail.com
-SourceCode: <public-source-url>
-IssueTracker: <public-issues-url>
-
-RepoType: git
-Repo: <public-clone-url>
-
-Builds:
-  - versionName: 1.0.0
-    versionCode: 1
-    commit: <full-40-character-commit-hash-for-v1.0.0>
-    gradle:
-      - yes
-
-AutoUpdateMode: Version
-UpdateCheckMode: Tags
-CurrentVersion: 1.0.0
-CurrentVersionCode: 1
-```
-
-The app has no AntiFeatures: it does not use network services, advertising,
-analytics, trackers, proprietary SDKs, or non-free assets.
-
-## Reproducibility
-
-The release build disables AGP's embedded VCS information and generated PNGs
-for vector resources. Build signed release APKs from the exact, clean tagged
-commit using JDK 17 and Gradle from the flake. Once the public release APK is
-available, compare it with the F-Droid CI build before enabling signature-copy
-verification.
+1. Increment `versionCode` and `versionName` in `app/build.gradle.kts`.
+2. Add `fastlane/metadata/android/en-US/changelogs/<versionCode>.txt` (maximum
+   500 characters).
+3. Build from a clean checkout with `nix develop -c gradle :app:assembleRelease`.
+4. Test the APK, commit, and make an annotated `v<versionName>` tag.
+5. Publish an upstream signed APK when reproducible signature verification is
+   enabled. F-Droid's `AutoUpdateMode: Version` and `UpdateCheckMode: Tags`
+   then detect the release and create the next build entry.

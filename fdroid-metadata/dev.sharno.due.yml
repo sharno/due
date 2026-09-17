@@ -1,0 +1,22 @@
+Categories:
+  - Time
+License: GPL-3.0-or-later
+AuthorName: Mohamed Elsharnouby
+AuthorEmail: sharnoby3@gmail.com
+SourceCode: https://github.com/sharno/due
+IssueTracker: https://github.com/sharno/due/issues
+
+RepoType: git
+Repo: https://github.com/sharno/due.git
+
+Builds:
+  - versionName: 1.0.0
+    versionCode: 1
+    commit: 009030afddede0fc72670434f4116e01c29cb162
+    gradle:
+      - yes
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: 1.0.0
+CurrentVersionCode: 1
