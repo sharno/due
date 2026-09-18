@@ -3,6 +3,9 @@ package dev.sharno.due
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class DeviceStateReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -14,6 +17,14 @@ class DeviceStateReceiver : BroadcastReceiver() {
             -> Unit
             else -> return
         }
-        TaskScheduler.synchronize(context, TodoRepository(context).all())
+
+        val pendingResult = goAsync()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                TaskScheduler.synchronize(context)
+            } finally {
+                pendingResult.finish()
+            }
+        }
     }
 }

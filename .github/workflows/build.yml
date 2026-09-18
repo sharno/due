@@ -8,17 +8,6 @@ on:
       - "v*"
   pull_request:
   workflow_dispatch:
-    inputs:
-      publish_release:
-        description: Publish the installable debug APK to GitHub Releases
-        required: false
-        default: false
-        type: boolean
-      release_tag:
-        description: Existing tag to publish (for example v1.0.0)
-        required: false
-        default: v1.0.0
-        type: string
 
 permissions:
   contents: read
@@ -32,7 +21,7 @@ jobs:
     name: Build release APK
     runs-on: ubuntu-24.04
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - name: Check out source
@@ -59,13 +48,65 @@ jobs:
       - name: Validate Nix flake
         run: nix flake check
 
+      - name: Run unit tests
+        run: >-
+          nix develop --accept-flake-config -c gradle
+          --no-daemon --console=plain
+          :app:testDebugUnitTest
+
       - name: Build and lint release APK
         run: >-
           nix develop --accept-flake-config -c gradle
           --no-daemon --console=plain
           :app:assembleRelease :app:lintRelease
 
-      - name: Build installable debug APK
+      - name: Write APK checksum
+        run: >-
+          sha256sum app/build/outputs/apk/release/app-release-unsigned.apk
+          | tee app/build/outputs/apk/release/app-release-unsigned.apk.sha256
+
+      - name: Prepare CI signing keystore
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          KEYSTORE_BASE64: ${{ secrets.DUE_SIGNING_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.DUE_SIGNING_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.DUE_SIGNING_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.DUE_SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_BASE64" || {
+            echo "DUE_SIGNING_KEYSTORE_BASE64 is not configured" >&2
+            exit 1
+          }
+          test -n "$STORE_PASSWORD" || {
+            echo "DUE_SIGNING_STORE_PASSWORD is not configured" >&2
+            exit 1
+          }
+          test -n "$KEY_ALIAS" || {
+            echo "DUE_SIGNING_KEY_ALIAS is not configured" >&2
+            exit 1
+          }
+          test -n "$KEY_PASSWORD" || {
+            echo "DUE_SIGNING_KEY_PASSWORD is not configured" >&2
+            exit 1
+          }
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/due-tester.jks"
+          test -s "$RUNNER_TEMP/due-tester.jks"
+
+      - name: Build signed tester APK
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          DUE_SIGNING_KEYSTORE: ${{ runner.temp }}/due-tester.jks
+          DUE_SIGNING_STORE_PASSWORD: ${{ secrets.DUE_SIGNING_STORE_PASSWORD }}
+          DUE_SIGNING_KEY_ALIAS: ${{ secrets.DUE_SIGNING_KEY_ALIAS }}
+          DUE_SIGNING_KEY_PASSWORD: ${{ secrets.DUE_SIGNING_KEY_PASSWORD }}
+        run: >-
+          nix develop --accept-flake-config -c gradle
+          --no-daemon --console=plain
+          :app:assembleSigned :app:lintSigned
+
+      - name: Build debug APK
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: >-
           nix develop --accept-flake-config -c gradle
           --no-daemon --console=plain
@@ -73,47 +114,60 @@ jobs:
 
       - name: Prepare installable APK
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk due-debug.apk
-          sha256sum due-debug.apk | tee due-debug.apk.sha256
+          mkdir -p release-assets
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            cp app/build/outputs/apk/signed/app-signed.apk release-assets/due-installable.apk
+          else
+            cp app/build/outputs/apk/debug/app-debug.apk release-assets/due-installable.apk
+          fi
+          cp app/build/outputs/apk/release/app-release-unsigned.apk release-assets/due-release-unsigned.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk.sha256 release-assets/due-release-unsigned.apk.sha256
+          sha256sum release-assets/due-installable.apk | tee release-assets/due-installable.apk.sha256
 
       - name: Scan APK with F-Droid
         run: >-
           nix develop --accept-flake-config -c fdroid scanner
           --exit-code app/build/outputs/apk/release/app-release-unsigned.apk
 
-      - name: Write APK checksum
-        run: >-
-          sha256sum app/build/outputs/apk/release/app-release-unsigned.apk
-          | tee app/build/outputs/apk/release/app-release-unsigned.apk.sha256
-
       - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
-          name: due-release-apk-${{ github.sha }}
+          name: due-build-${{ github.sha }}
           if-no-files-found: error
-          path: |
-            app/build/outputs/apk/release/app-release-unsigned.apk
-            app/build/outputs/apk/release/app-release-unsigned.apk.sha256
-            due-debug.apk
-            due-debug.apk.sha256
+          path: release-assets
+
+  publish:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: due-build-${{ github.sha }}
+          path: release-assets
 
       - name: Publish installable APK to GitHub Release
-        if: >-
-          startsWith(github.ref, 'refs/tags/v') ||
-          (github.event_name == 'workflow_dispatch' && inputs.publish_release)
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.release_tag }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
 
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" due-debug.apk due-debug.apk.sha256 --clobber
+            gh release upload "$RELEASE_TAG" \
+              release-assets/due-installable.apk \
+              release-assets/due-installable.apk.sha256 \
+              --clobber
           else
             gh release create "$RELEASE_TAG" \
               --verify-tag \
               --title "Due $RELEASE_TAG" \
-              --notes "Installable CI debug build of Due for testing. This APK is debug-signed and is not the F-Droid release artifact." \
-              due-debug.apk \
-              due-debug.apk.sha256
+              --notes "Installable CI testing build of Due. This APK is signed with the project's stable testing key. The unsigned release build remains available in the CI artifact for F-Droid." \
+              release-assets/due-installable.apk \
+              release-assets/due-installable.apk.sha256
           fi

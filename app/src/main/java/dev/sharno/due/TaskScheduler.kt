@@ -12,6 +12,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.flow.first
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -29,10 +30,20 @@ object TaskScheduler {
     private const val WATCHDOG_INTERVAL_MILLIS = 15 * 60 * 1000L
     private val dueTimeFormatter = DateTimeFormatter.ofPattern("EEE, MMM d · HH:mm")
 
-    fun synchronize(context: Context, todos: List<Todo>) {
+    suspend fun synchronize(context: Context) {
+        val repository = TodoRepository(context)
+        val settings = SettingsRepository(context).settings.first()
+        synchronize(context, repository.all(), settings)
+    }
+
+    fun synchronize(
+        context: Context,
+        todos: List<Todo>,
+        settings: DueSettings = DueSettings(),
+    ) {
         val now = System.currentTimeMillis()
-        todos.filterNot(Todo::completed).forEach { todo ->
-            if (todo.dueAtMillis > now) {
+        todos.forEach { todo ->
+            if (settings.remindersEnabled && !todo.completed && todo.dueAtMillis > now) {
                 schedule(context, todo)
             } else {
                 cancelAlarm(context, todo.id)
@@ -41,10 +52,12 @@ object TaskScheduler {
 
         val overdue = todos
             .asSequence()
-            .filterNot(Todo::completed)
-            .filter { it.dueAtMillis <= now }
-            .sortedBy(Todo::dueAtMillis)
-            .toList()
+            .takeIf { settings.remindersEnabled }
+            ?.filterNot(Todo::completed)
+            ?.filter { it.dueAtMillis <= now }
+            ?.sortedBy(Todo::dueAtMillis)
+            ?.toList()
+            ?: emptyList()
 
         updateOverdueNotification(context, overdue)
         if (overdue.isNotEmpty() && canPostNotifications(context)) {

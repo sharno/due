@@ -14,11 +14,21 @@ The first Gradle build downloads Android/Compose dependencies into Gradle's cach
 
 On first launch, allow notifications. For exact to-the-minute alarms on Android 12+, use **Enable exact reminders** in the app settings; without that permission Android may defer alarms while the device is idle. Due rechecks and restores the persistent overdue notification when the app opens, the app is updated, the device reboots, or the time/time-zone changes. If Android or a device manufacturer dismisses an overdue notification, Due immediately re-posts it and runs a best-effort 15-minute watchdog until the task is complete.
 
+## Data safety
+
+Todos are stored locally in a Room database. Use **Settings → Export todos** to
+create a portable JSON backup before changing devices or switching between
+F-Droid and direct-download builds. **Import todos** replaces the current list
+only after confirmation. Android backup includes the todo database and app
+settings, but uninstalling the app still removes its local data.
+
 ## F-Droid
 
 Due is designed for F-Droid: it is fully offline and contains no network
 services, accounts, advertising, analytics, trackers, or proprietary SDKs.
 Release and submission steps are documented in [F_DROID.md](F_DROID.md).
+Direct-download signing and key-custody details are documented in
+[SIGNING.md](SIGNING.md).
 
 The flake also provides F-Droid's scanner. Scan a release APK with:
 

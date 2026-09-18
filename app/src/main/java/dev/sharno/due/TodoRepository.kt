@@ -1,43 +1,39 @@
 package dev.sharno.due
 
 import android.content.Context
-import org.json.JSONArray
-import org.json.JSONObject
+import androidx.room.withTransaction
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 
 class TodoRepository(context: Context) {
-    private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+    private val database = DueDatabase.get(context)
+    private val todos = database.todoDao()
 
-    fun all(): List<Todo> {
-        val raw = preferences.getString(TODOS_KEY, "[]") ?: error("Todo storage is unavailable")
-        val values = JSONArray(raw)
-        return List(values.length()) { index ->
-            values.getJSONObject(index).toTodo()
+    fun observe(): Flow<List<Todo>> = todos.observeAll().map { values -> values.map(TodoEntity::toTodo) }
+
+    suspend fun all(): List<Todo> = todos.all().map(TodoEntity::toTodo)
+
+    suspend fun add(todo: Todo) {
+        todos.insert(todo.toEntity())
+    }
+
+    suspend fun setCompleted(taskId: String, completed: Boolean) {
+        todos.setCompleted(taskId, completed)
+    }
+
+    suspend fun delete(taskId: String) {
+        todos.delete(taskId)
+    }
+
+    suspend fun replaceAll(values: List<Todo>) {
+        database.withTransaction {
+            todos.deleteAll()
+            todos.insertAll(values.map(Todo::toEntity))
         }
     }
 
-    fun save(todos: List<Todo>) {
-        val values = JSONArray()
-        todos.forEach { todo -> values.put(todo.toJson()) }
-        check(preferences.edit().putString(TODOS_KEY, values.toString()).commit()) {
-            "Unable to save todos"
-        }
-    }
-
-    private fun Todo.toJson(): JSONObject = JSONObject()
-        .put("id", id)
-        .put("title", title)
-        .put("dueAtMillis", dueAtMillis)
-        .put("completed", completed)
-
-    private fun JSONObject.toTodo(): Todo = Todo(
-        id = getString("id"),
-        title = getString("title"),
-        dueAtMillis = getLong("dueAtMillis"),
-        completed = getBoolean("completed"),
-    )
-
-    private companion object {
-        const val PREFERENCES_NAME = "todos"
-        const val TODOS_KEY = "items"
+    internal companion object {
+        const val LEGACY_PREFERENCES_NAME = "todos"
+        const val LEGACY_TODOS_KEY = "items"
     }
 }

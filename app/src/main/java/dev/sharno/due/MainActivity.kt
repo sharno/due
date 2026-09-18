@@ -6,9 +6,11 @@ import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.widget.Toast
 import androidx.annotation.RequiresApi
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -30,6 +32,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -41,6 +44,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -59,7 +63,9 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -75,7 +81,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        TaskScheduler.synchronize(this, TodoRepository(this).all())
+        lifecycleScope.launch {
+            TaskScheduler.synchronize(this@MainActivity)
+        }
     }
 }
 
@@ -83,13 +91,36 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun DueApp(viewModel: TodoViewModel = viewModel()) {
     val todos by viewModel.todos.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showNewTodo by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
+    var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
+
+    fun showOperationResult(result: Result<Unit>, successMessage: String) {
+        val message = result.fold(
+            onSuccess = { successMessage },
+            onFailure = { error -> error.message ?: "The operation failed" },
+        )
+        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+    }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument(TodoBackup.MIME_TYPE),
+    ) { uri ->
+        if (uri != null) {
+            viewModel.export(uri) { result -> showOperationResult(result, "Todos exported") }
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> pendingImportUri = uri }
+
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         if (granted) {
-            TaskScheduler.synchronize(context, todos)
+            TaskScheduler.synchronize(context, todos, settings)
         }
     }
 
@@ -116,6 +147,9 @@ private fun DueApp(viewModel: TodoViewModel = viewModel()) {
                             TextButton(onClick = { context.startActivity(exactAlarmsSettingsIntent()) }) {
                                 Text("Enable exact reminders")
                             }
+                        }
+                        IconButton(onClick = { showSettings = true }) {
+                            Icon(Icons.Outlined.Settings, contentDescription = "Settings")
                         }
                     },
                 )
@@ -151,6 +185,41 @@ private fun DueApp(viewModel: TodoViewModel = viewModel()) {
                 },
             )
         }
+
+        if (showSettings) {
+            SettingsDialog(
+                remindersEnabled = settings.remindersEnabled,
+                onRemindersEnabledChanged = viewModel::setRemindersEnabled,
+                onExport = {
+                    showSettings = false
+                    exportLauncher.launch(TodoBackup.FILE_NAME)
+                },
+                onImport = {
+                    showSettings = false
+                    importLauncher.launch(arrayOf(TodoBackup.MIME_TYPE, "text/plain"))
+                },
+                onDismiss = { showSettings = false },
+            )
+        }
+
+        pendingImportUri?.let { uri ->
+            AlertDialog(
+                onDismissRequest = { pendingImportUri = null },
+                title = { Text("Import todos?") },
+                text = { Text("This replaces all current todos with the selected backup.") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            pendingImportUri = null
+                            viewModel.import(uri) { result -> showOperationResult(result, "Todos imported") }
+                        },
+                    ) { Text("Import") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingImportUri = null }) { Text("Cancel") }
+                },
+            )
+        }
     }
 }
 
@@ -163,6 +232,49 @@ private fun EmptyTodos(modifier: Modifier = Modifier) {
             Text("Add a task. Its date and time start as today and now.")
         }
     }
+}
+
+@Composable
+private fun SettingsDialog(
+    remindersEnabled: Boolean,
+    onRemindersEnabledChanged: (Boolean) -> Unit,
+    onExport: () -> Unit,
+    onImport: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Settings") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Overdue reminders", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Keep an ongoing notification until tasks are completed.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = remindersEnabled,
+                        onCheckedChange = onRemindersEnabledChanged,
+                    )
+                }
+                Text(
+                    "Back up your todos as a portable JSON file before changing devices or installing a different build channel.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Button(onClick = onExport, modifier = Modifier.fillMaxWidth()) {
+                    Text("Export todos")
+                }
+                Button(onClick = onImport, modifier = Modifier.fillMaxWidth()) {
+                    Text("Import todos")
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
 }
 
 @Composable

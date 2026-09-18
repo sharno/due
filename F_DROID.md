@@ -9,7 +9,7 @@ before it is proposed upstream.
 ## Completed readiness work
 
 - GPL-3.0-or-later source license.
-- Public, tagged source release: [`v1.0.0`](https://github.com/sharno/due/tree/v1.0.0).
+- Public, tagged source release: [`v1.0.2`](https://github.com/sharno/due/tree/v1.0.2).
 - Upstream Fastlane title, descriptions, changelog, and 512×512 PNG icon.
 - Offline-only source with no account, ads, analytics, tracking, network
   service, proprietary SDK, or bundled binary dependency.
@@ -27,7 +27,7 @@ before it is proposed upstream.
   `fastlane/metadata/android/en-US/images/phoneScreenshots/`. This is needed
   for F-Droid's Latest-tab listing criteria.
 - Generate, securely back up, and protect a long-lived Android release signing
-  key. Build and publish a developer-signed `v1.0.0` APK if you want F-Droid
+  key. Build and publish a developer-signed `v1.0.2` APK if you want F-Droid
   to verify and distribute the APK with your own signing identity. F-Droid can
   instead sign its own build, so this does not block the initial submission.
 
