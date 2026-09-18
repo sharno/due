@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.AlarmManager
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -29,6 +30,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -56,6 +59,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -89,10 +93,14 @@ class MainActivity : ComponentActivity() {
 private fun DueApp(viewModel: TodoViewModel = viewModel()) {
     val todos by viewModel.todos.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val automaticBackupError by viewModel.automaticBackupError.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showNewTodo by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingAutomaticBackupUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingEncryptedRestoreUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingRestorePassphraseUri by remember { mutableStateOf<Uri?>(null) }
 
     fun showOperationResult(result: Result<Unit>, successMessage: String) {
         val message = result.fold(
@@ -112,6 +120,21 @@ private fun DueApp(viewModel: TodoViewModel = viewModel()) {
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri -> pendingImportUri = uri }
+    val automaticBackupLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument(EncryptedTodoBackup.MIME_TYPE),
+    ) { uri ->
+        if (uri != null) {
+            val result = runCatching { persistAutomaticBackupPermission(context, uri) }
+            if (result.isSuccess) {
+                pendingAutomaticBackupUri = uri
+            } else {
+                showOperationResult(result, "Automatic backup destination selected")
+            }
+        }
+    }
+    val encryptedRestoreLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> pendingEncryptedRestoreUri = uri }
 
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -192,6 +215,8 @@ private fun DueApp(viewModel: TodoViewModel = viewModel()) {
         if (showSettings) {
             SettingsDialog(
                 remindersEnabled = settings.remindersEnabled,
+                automaticBackupConfigured = settings.automaticBackupConfigured,
+                automaticBackupError = automaticBackupError,
                 onRemindersEnabledChanged = viewModel::setRemindersEnabled,
                 onExport = {
                     showSettings = false
@@ -200,6 +225,22 @@ private fun DueApp(viewModel: TodoViewModel = viewModel()) {
                 onImport = {
                     showSettings = false
                     importLauncher.launch(arrayOf(TodoBackup.MIME_TYPE, "text/plain"))
+                },
+                onConfigureAutomaticBackup = {
+                    showSettings = false
+                    automaticBackupLauncher.launch(EncryptedTodoBackup.FILE_NAME)
+                },
+                onBackupNow = {
+                    viewModel.backupNow { result -> showOperationResult(result, "Encrypted backup updated") }
+                },
+                onDisableAutomaticBackup = {
+                    viewModel.disableAutomaticBackup { result ->
+                        showOperationResult(result, "Automatic backup disabled")
+                    }
+                },
+                onRestoreEncrypted = {
+                    showSettings = false
+                    encryptedRestoreLauncher.launch(arrayOf(EncryptedTodoBackup.MIME_TYPE, "text/plain"))
                 },
                 onDismiss = { showSettings = false },
             )
@@ -223,6 +264,57 @@ private fun DueApp(viewModel: TodoViewModel = viewModel()) {
                 },
             )
         }
+
+        pendingAutomaticBackupUri?.let { uri ->
+            BackupPassphraseDialog(
+                title = "Protect automatic backup",
+                description = "Choose a passphrase for the encrypted file. Due protects it with this device's Android Keystore; keep the passphrase for restoring on another device.",
+                confirmPassphrase = true,
+                confirmLabel = "Enable backup",
+                onDismiss = { pendingAutomaticBackupUri = null },
+                onConfirm = { passphrase ->
+                    pendingAutomaticBackupUri = null
+                    viewModel.configureAutomaticBackup(uri, passphrase) { result ->
+                        showOperationResult(result, "Encrypted automatic backup enabled")
+                    }
+                },
+            )
+        }
+
+        pendingEncryptedRestoreUri?.let { uri ->
+            AlertDialog(
+                onDismissRequest = { pendingEncryptedRestoreUri = null },
+                title = { Text("Restore encrypted backup?") },
+                text = { Text("This replaces all current todos after the backup is decrypted.") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            pendingEncryptedRestoreUri = null
+                            pendingRestorePassphraseUri = uri
+                        },
+                    ) { Text("Continue") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingEncryptedRestoreUri = null }) { Text("Cancel") }
+                },
+            )
+        }
+
+        pendingRestorePassphraseUri?.let { uri ->
+            BackupPassphraseDialog(
+                title = "Decrypt backup",
+                description = "Enter the passphrase used when this encrypted backup was created.",
+                confirmPassphrase = false,
+                confirmLabel = "Restore",
+                onDismiss = { pendingRestorePassphraseUri = null },
+                onConfirm = { passphrase ->
+                    pendingRestorePassphraseUri = null
+                    viewModel.restoreEncrypted(uri, passphrase) { result ->
+                        showOperationResult(result, "Encrypted todos restored")
+                    }
+                },
+            )
+        }
     }
 }
 
@@ -240,16 +332,25 @@ private fun EmptyTodos(modifier: Modifier = Modifier) {
 @Composable
 private fun SettingsDialog(
     remindersEnabled: Boolean,
+    automaticBackupConfigured: Boolean,
+    automaticBackupError: String?,
     onRemindersEnabledChanged: (Boolean) -> Unit,
     onExport: () -> Unit,
     onImport: () -> Unit,
+    onConfigureAutomaticBackup: () -> Unit,
+    onBackupNow: () -> Unit,
+    onDisableAutomaticBackup: () -> Unit,
+    onRestoreEncrypted: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Settings") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Overdue reminders", style = MaterialTheme.typography.titleMedium)
@@ -274,9 +375,97 @@ private fun SettingsDialog(
                 Button(onClick = onImport, modifier = Modifier.fillMaxWidth()) {
                     Text("Import todos")
                 }
+                Text(
+                    "Choose a Google Drive file (or another document provider) for an encrypted snapshot. Due does not use a Google account or sync service directly.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    if (automaticBackupConfigured) {
+                        "Automatic encrypted backup is enabled. It is rewritten after each todo change."
+                    } else {
+                        "Automatic encrypted backup is not configured."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                automaticBackupError?.let { error ->
+                    Text(
+                        "Last automatic backup failed: $error",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                Button(onClick = onConfigureAutomaticBackup, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (automaticBackupConfigured) "Change backup file" else "Set up automatic backup")
+                }
+                if (automaticBackupConfigured) {
+                    Button(onClick = onBackupNow, modifier = Modifier.fillMaxWidth()) {
+                        Text("Back up now")
+                    }
+                    TextButton(onClick = onDisableAutomaticBackup) {
+                        Text("Disable automatic backup")
+                    }
+                }
+                Button(onClick = onRestoreEncrypted, modifier = Modifier.fillMaxWidth()) {
+                    Text("Restore encrypted backup")
+                }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
+}
+
+@Composable
+private fun BackupPassphraseDialog(
+    title: String,
+    description: String,
+    confirmPassphrase: Boolean,
+    confirmLabel: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var passphrase by remember { mutableStateOf("") }
+    var repeatedPassphrase by remember { mutableStateOf("") }
+    val mismatch = confirmPassphrase && repeatedPassphrase.isNotEmpty() && passphrase != repeatedPassphrase
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(description, style = MaterialTheme.typography.bodyMedium)
+                OutlinedTextField(
+                    value = passphrase,
+                    onValueChange = { passphrase = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Passphrase") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true,
+                )
+                if (confirmPassphrase) {
+                    OutlinedTextField(
+                        value = repeatedPassphrase,
+                        onValueChange = { repeatedPassphrase = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Repeat passphrase") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        isError = mismatch,
+                        supportingText = if (mismatch) {
+                            { Text("Passphrases do not match") }
+                        } else {
+                            null
+                        },
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = passphrase.isNotEmpty() && (!confirmPassphrase || passphrase == repeatedPassphrase),
+                onClick = { onConfirm(passphrase) },
+            ) { Text(confirmLabel) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 
@@ -457,3 +646,19 @@ private fun exactAlarmsSettingsIntent(): Intent = Intent(Settings.ACTION_REQUEST
 private fun canScheduleExactAlarms(context: android.content.Context): Boolean =
     Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
         context.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
+
+private fun persistAutomaticBackupPermission(context: Context, uri: Uri) {
+    val readWrite = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+    try {
+        context.contentResolver.takePersistableUriPermission(uri, readWrite)
+    } catch (first: SecurityException) {
+        try {
+            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        } catch (second: SecurityException) {
+            throw IllegalStateException(
+                "The selected storage provider does not support persistent automatic backups",
+                second,
+            )
+        }
+    }
+}

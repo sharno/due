@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 class TodoViewModel(application: Application) : AndroidViewModel(application) {
@@ -18,6 +20,9 @@ class TodoViewModel(application: Application) : AndroidViewModel(application) {
     val todos = _todos.asStateFlow()
     private val _settings = MutableStateFlow(DueSettings())
     val settings = _settings.asStateFlow()
+    private val _automaticBackupError = MutableStateFlow<String?>(null)
+    val automaticBackupError = _automaticBackupError.asStateFlow()
+    private val automaticBackupMutex = Mutex()
 
     init {
         viewModelScope.launch {
@@ -27,6 +32,11 @@ class TodoViewModel(application: Application) : AndroidViewModel(application) {
                     _todos.value = state.todos
                     _settings.value = state.settings
                     TaskScheduler.synchronize(application, state.todos, state.settings)
+                    if (state.settings.automaticBackupConfigured) {
+                        writeAutomaticBackup(state.todos)
+                    } else {
+                        _automaticBackupError.value = null
+                    }
                 }
         }
     }
@@ -56,6 +66,40 @@ class TodoViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun configureAutomaticBackup(uri: Uri, passphrase: String, onResult: (Result<Unit>) -> Unit) {
+        viewModelScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    settingsRepository.configureAutomaticBackup(uri, passphrase)
+                }
+                val todos = withContext(Dispatchers.IO) { repository.all() }
+                writeAutomaticBackup(todos).getOrThrow()
+            }
+            if (result.isFailure) {
+                _automaticBackupError.value = result.exceptionOrNull()?.message
+            }
+            onResult(result)
+        }
+    }
+
+    fun backupNow(onResult: (Result<Unit>) -> Unit) {
+        viewModelScope.launch {
+            val todos = withContext(Dispatchers.IO) { repository.all() }
+            val result = writeAutomaticBackup(todos)
+            onResult(result)
+        }
+    }
+
+    fun disableAutomaticBackup(onResult: (Result<Unit>) -> Unit) {
+        viewModelScope.launch {
+            val result = runCatching {
+                settingsRepository.clearAutomaticBackup()
+                _automaticBackupError.value = null
+            }
+            onResult(result)
+        }
+    }
+
     fun export(uri: Uri, onResult: (Result<Unit>) -> Unit) {
         viewModelScope.launch {
             val result = runCatching {
@@ -82,6 +126,44 @@ class TodoViewModel(application: Application) : AndroidViewModel(application) {
             }
             onResult(result)
         }
+    }
+
+    fun restoreEncrypted(uri: Uri, passphrase: String, onResult: (Result<Unit>) -> Unit) {
+        viewModelScope.launch {
+            val result = runCatching {
+                val todos = withContext(Dispatchers.IO) {
+                    val input = getApplication<Application>().contentResolver.openInputStream(uri)
+                        ?: error("Unable to open the selected file")
+                    input.bufferedReader().use { reader ->
+                        EncryptedTodoBackup.decode(reader.readText(), passphrase)
+                    }
+                }
+                repository.replaceAll(todos)
+            }
+            onResult(result)
+        }
+    }
+
+    private suspend fun writeAutomaticBackup(todos: List<Todo>): Result<Unit> {
+        val result = runCatching {
+            automaticBackupMutex.withLock {
+                val configuration = withContext(Dispatchers.IO) {
+                    settingsRepository.automaticBackupConfiguration()
+                } ?: error("Automatic backup is not configured")
+                val contents = withContext(Dispatchers.IO) {
+                    EncryptedTodoBackup.encode(todos, configuration.passphrase)
+                }
+                withContext(Dispatchers.IO) {
+                    val output = getApplication<Application>().contentResolver.openOutputStream(
+                        configuration.uri,
+                        "w",
+                    ) ?: error("Unable to open the automatic backup file")
+                    output.bufferedWriter().use { writer -> writer.write(contents) }
+                }
+            }
+        }
+        _automaticBackupError.value = result.exceptionOrNull()?.message
+        return result
     }
 
     private data class TodoState(

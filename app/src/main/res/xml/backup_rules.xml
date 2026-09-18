@@ -2,4 +2,5 @@
 <full-backup-content>
     <include domain="database" path="due.db" />
     <include domain="file" path="datastore/settings.preferences_pb" />
+    <!-- The automatic-backup URI and Keystore-wrapped passphrase are device-bound. -->
 </full-backup-content>
