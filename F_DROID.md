@@ -18,6 +18,8 @@ before it is proposed upstream.
 - Clean release builds are byte-for-byte identical locally.
 - AGP VCS metadata and generated vector PNGs are disabled for release
   reproducibility.
+- Direct-download tester APKs are signed in CI with a long-lived key documented
+  in [SIGNING.md](SIGNING.md).
 
 ## Still required before submitting
 
@@ -26,10 +28,9 @@ before it is proposed upstream.
 - Capture and commit at least one genuine phone screenshot to
   `fastlane/metadata/android/en-US/images/phoneScreenshots/`. This is needed
   for F-Droid's Latest-tab listing criteria.
-- Generate, securely back up, and protect a long-lived Android release signing
-  key. Build and publish a developer-signed `v1.0.2` APK if you want F-Droid
-  to verify and distribute the APK with your own signing identity. F-Droid can
-  instead sign its own build, so this does not block the initial submission.
+- Configure F-Droid verified-reproducible signing if you want F-Droid and
+  direct-download APKs to share the same signing identity. F-Droid can instead
+  sign its own build, so this does not block the initial submission.
 
 ## Submit the initial recipe
 
