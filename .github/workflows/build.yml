@@ -8,6 +8,17 @@ on:
       - "v*"
   pull_request:
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish the signed installable APK to an existing tag
+        required: false
+        default: false
+        type: boolean
+      release_tag:
+        description: Existing version tag to publish (for example v1.0.2)
+        required: false
+        default: v1.0.2
+        type: string
 
 permissions:
   contents: read
@@ -66,7 +77,9 @@ jobs:
           | tee app/build/outputs/apk/release/app-release-unsigned.apk.sha256
 
       - name: Prepare CI signing keystore
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: >-
+          startsWith(github.ref, 'refs/tags/v') ||
+          (github.event_name == 'workflow_dispatch' && inputs.publish_release)
         env:
           KEYSTORE_BASE64: ${{ secrets.DUE_SIGNING_KEYSTORE_BASE64 }}
           STORE_PASSWORD: ${{ secrets.DUE_SIGNING_STORE_PASSWORD }}
@@ -94,7 +107,9 @@ jobs:
           test -s "$RUNNER_TEMP/due-tester.jks"
 
       - name: Build signed tester APK
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: >-
+          startsWith(github.ref, 'refs/tags/v') ||
+          (github.event_name == 'workflow_dispatch' && inputs.publish_release)
         env:
           DUE_SIGNING_KEYSTORE: ${{ runner.temp }}/due-tester.jks
           DUE_SIGNING_STORE_PASSWORD: ${{ secrets.DUE_SIGNING_STORE_PASSWORD }}
@@ -106,16 +121,22 @@ jobs:
           :app:assembleSigned :app:lintSigned
 
       - name: Build debug APK
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        if: >-
+          !startsWith(github.ref, 'refs/tags/v') &&
+          !(github.event_name == 'workflow_dispatch' && inputs.publish_release)
         run: >-
           nix develop --accept-flake-config -c gradle
           --no-daemon --console=plain
           :app:assembleDebug :app:lintDebug
 
       - name: Prepare installable APK
+        env:
+          RELEASE_BUILD: >-
+            ${{ startsWith(github.ref, 'refs/tags/v') ||
+                (github.event_name == 'workflow_dispatch' && inputs.publish_release) }}
         run: |
           mkdir -p release-assets
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          if [[ "$RELEASE_BUILD" == true ]]; then
             cp app/build/outputs/apk/signed/app-signed.apk release-assets/due-installable.apk
           else
             cp app/build/outputs/apk/debug/app-debug.apk release-assets/due-installable.apk
@@ -138,7 +159,9 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_release)
     needs: build
     runs-on: ubuntu-24.04
     permissions:
@@ -154,17 +177,21 @@ jobs:
       - name: Publish installable APK to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: >-
+            ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.release_tag }}
         run: |
           set -euo pipefail
 
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+          if gh release view "$RELEASE_TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" \
+              --repo "$GH_REPO" \
               release-assets/due-installable.apk \
               release-assets/due-installable.apk.sha256 \
               --clobber
           else
             gh release create "$RELEASE_TAG" \
+              --repo "$GH_REPO" \
               --verify-tag \
               --title "Due $RELEASE_TAG" \
               --notes "Installable CI testing build of Due. This APK is signed with the project's stable testing key. The unsigned release build remains available in the CI artifact for F-Droid." \
