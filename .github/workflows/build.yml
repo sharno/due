@@ -72,9 +72,9 @@ jobs:
           :app:assembleRelease :app:lintRelease
 
       - name: Write APK checksum
-        run: >-
-          sha256sum app/build/outputs/apk/release/app-release-unsigned.apk
-          | tee app/build/outputs/apk/release/app-release-unsigned.apk.sha256
+        run: |
+          cd app/build/outputs/apk/release
+          sha256sum app-release-unsigned.apk | tee app-release-unsigned.apk.sha256
 
       - name: Prepare CI signing keystore
         if: >-
@@ -143,7 +143,8 @@ jobs:
           fi
           cp app/build/outputs/apk/release/app-release-unsigned.apk release-assets/due-release-unsigned.apk
           cp app/build/outputs/apk/release/app-release-unsigned.apk.sha256 release-assets/due-release-unsigned.apk.sha256
-          sha256sum release-assets/due-installable.apk | tee release-assets/due-installable.apk.sha256
+          cd release-assets
+          sha256sum due-installable.apk | tee due-installable.apk.sha256
 
       - name: Scan APK with F-Droid
         run: >-
