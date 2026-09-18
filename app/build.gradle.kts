@@ -24,8 +24,8 @@ android {
         applicationId = "dev.sharno.due"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.0.2"
+        versionCode = 4
+        versionName = "1.0.3"
 
         // minSdk 26 natively supports vector drawables. Avoiding generated PNGs
         // also keeps release APKs reproducible across Android build environments.
@@ -61,6 +61,8 @@ android {
         if (hasCiSigning) {
             create("signed") {
                 initWith(getByName("release"))
+                isMinifyEnabled = true
+                isShrinkResources = true
                 signingConfig = signingConfigs.getByName("ciTester")
                 matchingFallbacks += listOf("release")
             }
@@ -85,7 +87,6 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2025.01.00"))
     implementation("androidx.activity:activity-compose:1.10.0")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
