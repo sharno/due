@@ -24,8 +24,8 @@ android {
         applicationId = "dev.sharno.due"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.2.0"
+        versionCode = 7
+        versionName = "1.3.0"
 
         // minSdk 26 natively supports vector drawables. Avoiding generated PNGs
         // also keeps release APKs reproducible across Android build environments.

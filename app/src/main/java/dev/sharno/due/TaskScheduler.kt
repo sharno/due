@@ -25,9 +25,10 @@ object TaskScheduler {
     const val EXTRA_TASK_ID = "task_id"
 
     private const val CHANNEL_ID = "overdue_tasks"
-    private const val NOTIFICATION_ID = 7
+    private const val LEGACY_NOTIFICATION_ID = 7
     private const val WATCHDOG_REQUEST_CODE = 1
     private const val WATCHDOG_INTERVAL_MILLIS = 15 * 60 * 1000L
+    private const val NOTIFICATION_TAG_PREFIX = "task:"
     private val dueTimeFormatter = DateTimeFormatter.ofPattern("EEE, MMM d · HH:mm")
 
     suspend fun synchronize(context: Context) {
@@ -59,7 +60,7 @@ object TaskScheduler {
             ?.toList()
             ?: emptyList()
 
-        updateOverdueNotification(context, overdue)
+        updateOverdueNotifications(context, overdue)
         if (overdue.isNotEmpty() && canPostNotifications(context)) {
             scheduleWatchdog(context)
         } else {
@@ -97,51 +98,61 @@ object TaskScheduler {
     }
 
     @SuppressLint("MissingPermission")
-    private fun updateOverdueNotification(context: Context, overdue: List<Todo>) {
+    private fun updateOverdueNotifications(context: Context, overdue: List<Todo>) {
         if (!canPostNotifications(context)) {
-            NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
-            return
-        }
-
-        if (overdue.isEmpty()) {
-            NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
+            cancelAllTaskNotifications(context)
             return
         }
 
         ensureChannel(context)
-        val first = overdue.first()
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_alert)
-            .setContentTitle("Overdue: ${first.title}")
-            .setContentText(overdueSummary(overdue))
-            .setStyle(
-                NotificationCompat.InboxStyle()
-                    .setBigContentTitle("${overdue.size} overdue task${if (overdue.size == 1) "" else "s"}")
-                    .also { style -> overdue.take(5).forEach { style.addLine(taskLine(it)) } }
-                    .setSummaryText("Complete tasks to clear this reminder"),
-            )
-            .setContentIntent(openAppPendingIntent(context))
-            // Some Android versions allow users to swipe ongoing reminders.
-            // Re-post immediately when that explicit dismissal happens.
-            .setDeleteIntent(notificationDismissedPendingIntent(context))
-            .addAction(
-                android.R.drawable.checkbox_on_background,
-                "Complete first",
-                completePendingIntent(context, first.id),
-            )
-            .setCategory(NotificationCompat.CATEGORY_REMINDER)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setOnlyAlertOnce(true)
-            .setOngoing(true)
-            .setAutoCancel(false)
-            .build()
+        val activeTags = overdue.asSequence().map { todo -> notificationTag(todo.id) }.toSet()
+        cancelStaleTaskNotifications(context, activeTags)
+        overdue.forEach { todo ->
+            val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                .setContentTitle("Overdue: ${todo.title}")
+                .setContentText("Due ${formatDueAt(todo.dueAtMillis)}")
+                .setStyle(NotificationCompat.BigTextStyle().bigText(taskLine(todo)))
+                .setContentIntent(openAppPendingIntent(context))
+                // Some Android versions allow users to swipe ongoing reminders.
+                // Re-post immediately when that explicit dismissal happens.
+                .setDeleteIntent(notificationDismissedPendingIntent(context, todo.id))
+                .addAction(
+                    android.R.drawable.checkbox_on_background,
+                    "Complete",
+                    completePendingIntent(context, todo.id),
+                )
+                .setCategory(NotificationCompat.CATEGORY_REMINDER)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setOnlyAlertOnce(true)
+                .setOngoing(true)
+                .setAutoCancel(false)
+                .build()
 
-        NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+            NotificationManagerCompat.from(context).notify(
+                notificationTag(todo.id),
+                notificationId(todo.id),
+                notification,
+            )
+        }
     }
 
-    private fun overdueSummary(overdue: List<Todo>): String = when (overdue.size) {
-        1 -> "Due ${taskLine(overdue.single())}"
-        else -> "${overdue.size} tasks need your attention"
+    private fun cancelStaleTaskNotifications(context: Context, activeTags: Set<String>) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        // v1.2.0 used one untagged aggregate notification. Remove it once the
+        // per-task notification scheme is active.
+        manager.cancel(LEGACY_NOTIFICATION_ID)
+        manager.activeNotifications
+            .asSequence()
+            .mapNotNull { notification -> notification.tag }
+            .filter { it.startsWith(NOTIFICATION_TAG_PREFIX) && it !in activeTags }
+            .forEach { tag ->
+                manager.cancel(tag, notificationId(tag.removePrefix(NOTIFICATION_TAG_PREFIX)))
+            }
+    }
+
+    private fun cancelAllTaskNotifications(context: Context) {
+        cancelStaleTaskNotifications(context, emptySet())
     }
 
     private fun taskLine(todo: Todo): String = "${todo.title} — ${formatDueAt(todo.dueAtMillis)}"
@@ -204,12 +215,13 @@ object TaskScheduler {
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
-    private fun notificationDismissedPendingIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(
+    private fun notificationDismissedPendingIntent(context: Context, taskId: String): PendingIntent = PendingIntent.getBroadcast(
         context,
-        NOTIFICATION_ID,
+        notificationId(taskId),
         Intent(context, TodoAlarmReceiver::class.java)
             .setAction(ACTION_NOTIFICATION_DISMISSED)
-            .setData(Uri.parse("due://notification/dismissed")),
+            .setData(Uri.parse("due://notification/dismissed/$taskId"))
+            .putExtra(EXTRA_TASK_ID, taskId),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
@@ -229,4 +241,12 @@ object TaskScheduler {
             .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
+
+    private fun notificationTag(taskId: String): String = "$NOTIFICATION_TAG_PREFIX$taskId"
+
+    private fun notificationId(taskId: String): Int = when (val hash = taskId.hashCode()) {
+        0 -> 1
+        LEGACY_NOTIFICATION_ID -> LEGACY_NOTIFICATION_ID + 1
+        else -> hash
+    }
 }

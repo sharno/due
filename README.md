@@ -12,7 +12,7 @@ The first Gradle build downloads Android/Compose dependencies into Gradle's cach
 
 ## Android permissions
 
-On first launch, allow notifications. For exact to-the-minute alarms on Android 12+, use **Enable exact reminders** in the app settings; without that permission Android may defer alarms while the device is idle. Due rechecks and restores the persistent overdue notification when the app opens, the app is updated, the device reboots, or the time/time-zone changes. If Android or a device manufacturer dismisses an overdue notification, Due immediately re-posts it and runs a best-effort 15-minute watchdog until the task is complete.
+On first launch, allow notifications. For exact to-the-minute alarms on Android 12+, use **Enable exact reminders** in the app settings; without that permission Android may defer alarms while the device is idle. Due rechecks and restores each persistent overdue-task notification when the app opens, the app is updated, the device reboots, or the time/time-zone changes. If Android or a device manufacturer dismisses an overdue notification, Due immediately re-posts it and runs a best-effort 15-minute watchdog until that task is complete.
 
 ## Data safety
 
