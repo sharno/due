@@ -10,6 +10,11 @@ RepoType: git
 Repo: https://github.com/sharno/due.git
 
 Builds:
+  - versionName: 1.2.0
+    versionCode: 6
+    commit: 9a628855ef0e340f9192f353f50b2ebf2b1011a7
+    gradle:
+      - yes
   - versionName: 1.1.0
     versionCode: 5
     commit: c23ed93593636ed176db7cdab7769e9c2aed394f
