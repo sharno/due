@@ -34,6 +34,8 @@ object TodoBackup {
                 title = value.getString("title").trim(),
                 dueAtMillis = value.getLong("dueAtMillis"),
                 completed = value.getBoolean("completed"),
+                recurrence = value.optJSONObject("recurrence")?.let(RecurrenceRuleCodec::decode),
+                occurrencesCompleted = value.optInt("occurrencesCompleted", 0),
             )
             require(todo.id.isNotBlank()) { "A todo backup contains an empty id" }
             require(todo.title.isNotBlank()) { "A todo backup contains an empty title" }
@@ -47,4 +49,6 @@ object TodoBackup {
         .put("title", title)
         .put("dueAtMillis", dueAtMillis)
         .put("completed", completed)
+        .put("recurrence", recurrence?.let(RecurrenceRuleCodec::encode) ?: JSONObject.NULL)
+        .put("occurrencesCompleted", occurrencesCompleted)
 }

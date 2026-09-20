@@ -7,6 +7,7 @@ import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
 import androidx.room.Insert
+import androidx.room.migration.Migration
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Room
@@ -20,6 +21,8 @@ data class TodoEntity(
     val title: String,
     val dueAtMillis: Long,
     val completed: Boolean,
+    val recurrence: String?,
+    val occurrencesCompleted: Int,
 )
 
 @Dao
@@ -36,8 +39,8 @@ interface TodoDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(todos: List<TodoEntity>)
 
-    @Query("UPDATE todos SET completed = :completed WHERE id = :taskId")
-    suspend fun setCompleted(taskId: String, completed: Boolean)
+    @Query("SELECT * FROM todos WHERE id = :taskId")
+    suspend fun byId(taskId: String): TodoEntity?
 
     @Query("DELETE FROM todos WHERE id = :taskId")
     suspend fun delete(taskId: String)
@@ -48,7 +51,7 @@ interface TodoDao {
 
 @Database(
     entities = [TodoEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class DueDatabase : RoomDatabase() {
@@ -56,6 +59,13 @@ abstract class DueDatabase : RoomDatabase() {
 
     companion object {
         private const val DATABASE_NAME = "due.db"
+
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE todos ADD COLUMN recurrence TEXT")
+                db.execSQL("ALTER TABLE todos ADD COLUMN occurrencesCompleted INTEGER NOT NULL DEFAULT 0")
+            }
+        }
 
         @Volatile
         private var instance: DueDatabase? = null
@@ -66,6 +76,7 @@ abstract class DueDatabase : RoomDatabase() {
                 DueDatabase::class.java,
                 DATABASE_NAME,
             )
+                .addMigrations(MIGRATION_1_2)
                 .addCallback(LegacyTodoMigration(context.applicationContext))
                 .build()
                 .also { instance = it }
@@ -112,6 +123,8 @@ fun Todo.toEntity(): TodoEntity = TodoEntity(
     title = title,
     dueAtMillis = dueAtMillis,
     completed = completed,
+    recurrence = recurrence?.let(RecurrenceRuleCodec::encodeToString),
+    occurrencesCompleted = occurrencesCompleted,
 )
 
 fun TodoEntity.toTodo(): Todo = Todo(
@@ -119,4 +132,6 @@ fun TodoEntity.toTodo(): Todo = Todo(
     title = title,
     dueAtMillis = dueAtMillis,
     completed = completed,
+    recurrence = recurrence?.let(RecurrenceRuleCodec::decodeFromString),
+    occurrencesCompleted = occurrencesCompleted,
 )

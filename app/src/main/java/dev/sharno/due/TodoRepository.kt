@@ -18,7 +18,28 @@ class TodoRepository(context: Context) {
     }
 
     suspend fun setCompleted(taskId: String, completed: Boolean) {
-        todos.setCompleted(taskId, completed)
+        database.withTransaction {
+            val current = todos.byId(taskId)?.toTodo() ?: return@withTransaction
+            if (completed) {
+                if (!current.completed) {
+                    todos.insert(current.completeAt(System.currentTimeMillis()).toEntity())
+                }
+            } else {
+                val occurrencesCompleted = if (
+                    current.completed && current.recurrence != null && current.occurrencesCompleted > 0
+                ) {
+                    current.occurrencesCompleted - 1
+                } else {
+                    current.occurrencesCompleted
+                }
+                todos.insert(
+                    current.copy(
+                        completed = false,
+                        occurrencesCompleted = occurrencesCompleted,
+                    ).toEntity(),
+                )
+            }
+        }
     }
 
     suspend fun delete(taskId: String) {

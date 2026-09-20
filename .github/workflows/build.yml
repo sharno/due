@@ -15,9 +15,9 @@ on:
         default: false
         type: boolean
       release_tag:
-        description: Existing version tag to publish (for example v1.1.0)
+        description: Existing version tag to publish (for example v1.2.0)
         required: false
-        default: v1.1.0
+        default: v1.2.0
         type: string
 
 permissions:

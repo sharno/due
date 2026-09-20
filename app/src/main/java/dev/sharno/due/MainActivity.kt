@@ -30,13 +30,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -68,11 +72,14 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import java.time.Instant
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -205,8 +212,8 @@ private fun DueApp(viewModel: TodoViewModel = viewModel()) {
         if (showNewTodo) {
             NewTodoDialog(
                 onDismiss = { showNewTodo = false },
-                onSave = { title, dueAtMillis ->
-                    viewModel.add(title, dueAtMillis)
+                onSave = { title, dueAtMillis, recurrence ->
+                    viewModel.add(title, dueAtMillis, recurrence)
                     showNewTodo = false
                 },
             )
@@ -517,6 +524,13 @@ private fun TodoRow(
                     color = if (overdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = if (overdue) FontWeight.SemiBold else FontWeight.Normal,
                 )
+                todo.recurrence?.let { recurrence ->
+                    Text(
+                        text = recurrenceSummary(recurrence),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             IconButton(onClick = { onDelete(todo) }) {
                 Icon(
@@ -534,15 +548,62 @@ private fun todoStatus(todo: Todo, overdue: Boolean): String = when {
     else -> "Due ${formatDueAt(todo.dueAtMillis)}"
 }
 
+private fun recurrenceSummary(rule: RecurrenceRule): String = when (rule.frequency) {
+    RecurrenceFrequency.DAILY -> "Repeats every ${rule.interval} day${if (rule.interval == 1) "" else "s"}"
+    RecurrenceFrequency.WEEKDAYS -> "Repeats every weekday"
+    RecurrenceFrequency.WEEKLY -> "Repeats every ${rule.interval} week${if (rule.interval == 1) "" else "s"} on " +
+        rule.daysOfWeek.sortedBy(DayOfWeek::getValue).joinToString(", ") { it.shortLabel() }
+    RecurrenceFrequency.MONTHLY -> "Repeats every ${rule.interval} month${if (rule.interval == 1) "" else "s"} on day ${rule.dayOfMonth}"
+    RecurrenceFrequency.YEARLY -> "Repeats every ${rule.interval} year${if (rule.interval == 1) "" else "s"}"
+}
+
+private fun DayOfWeek.shortLabel(): String = getDisplayName(TextStyle.SHORT, Locale.getDefault())
+
+private enum class RepeatPattern(val label: String) {
+    NONE("Does not repeat"),
+    DAILY("Daily"),
+    WEEKLY("Weekly"),
+    MONTHLY("Monthly"),
+    YEARLY("Annually"),
+    WEEKDAYS("Every weekday"),
+    CUSTOM("Custom"),
+}
+
+private enum class RepeatUnit(val label: String) {
+    DAY("day"),
+    WEEK("week"),
+    MONTH("month"),
+    YEAR("year"),
+}
+
+private enum class RepeatEndMode(val label: String) {
+    NEVER("Never"),
+    ON_DATE("On date"),
+    AFTER_OCCURRENCES("After occurrences"),
+}
+
 @Composable
 private fun NewTodoDialog(
     onDismiss: () -> Unit,
-    onSave: (title: String, dueAtMillis: Long) -> Unit,
+    onSave: (title: String, dueAtMillis: Long, recurrence: RecurrenceRule?) -> Unit,
 ) {
     val context = LocalContext.current
     var title by remember { mutableStateOf("") }
     var dueAtMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var showTitleError by remember { mutableStateOf(false) }
+    var recurrenceError by remember { mutableStateOf<String?>(null) }
+    var repeatPattern by remember { mutableStateOf(RepeatPattern.NONE) }
+    var customUnit by remember { mutableStateOf(RepeatUnit.WEEK) }
+    var customInterval by remember { mutableStateOf("1") }
+    var selectedWeekdays by remember {
+        mutableStateOf(setOf(dueAtMillis.asLocalDateTime().dayOfWeek))
+    }
+    var customMonthDay by remember {
+        mutableStateOf(dueAtMillis.asLocalDateTime().dayOfMonth.toString())
+    }
+    var repeatEndMode by remember { mutableStateOf(RepeatEndMode.NEVER) }
+    var repeatEndDateMillis by remember { mutableLongStateOf(dueAtMillis) }
+    var repeatOccurrences by remember { mutableStateOf("10") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -559,11 +620,6 @@ private fun NewTodoDialog(
                     label = { Text("What needs doing?") },
                     singleLine = true,
                     isError = showTitleError,
-                    supportingText = if (showTitleError) {
-                        { Text("A todo needs a title") }
-                    } else {
-                        null
-                    },
                 )
                 Text("Due date and time", style = MaterialTheme.typography.labelLarge)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -573,10 +629,22 @@ private fun NewTodoDialog(
                             DatePickerDialog(
                                 context,
                                 { _, year, month, day ->
+                                    val previousDueAtMillis = dueAtMillis
+                                    val previousDate = previousDueAtMillis.asLocalDateTime().toLocalDate()
+                                    val nextDate = LocalDate.of(year, month + 1, day)
                                     dueAtMillis = LocalDateTime.of(
-                                        LocalDate.of(year, month + 1, day),
+                                        nextDate,
                                         dueAtMillis.asLocalDateTime().toLocalTime(),
                                     ).toMillis()
+                                    if (selectedWeekdays == setOf(previousDate.dayOfWeek)) {
+                                        selectedWeekdays = setOf(nextDate.dayOfWeek)
+                                    }
+                                    if (customMonthDay == previousDate.dayOfMonth.toString()) {
+                                        customMonthDay = nextDate.dayOfMonth.toString()
+                                    }
+                                    if (repeatEndDateMillis == previousDueAtMillis) {
+                                        repeatEndDateMillis = dueAtMillis
+                                    }
                                 },
                                 current.year,
                                 current.monthValue - 1,
@@ -602,11 +670,134 @@ private fun NewTodoDialog(
                         },
                     ) { Text(formatTime(dueAtMillis)) }
                 }
-                Text(
-                    "Both are required and already set to today and now.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Text("Repeat", style = MaterialTheme.typography.labelLarge)
+                RepeatPatternPicker(
+                    selected = repeatPattern,
+                    onSelected = {
+                        repeatPattern = it
+                        recurrenceError = null
+                    },
                 )
+                if (repeatPattern != RepeatPattern.NONE) {
+                    when (repeatPattern) {
+                        RepeatPattern.WEEKLY -> {
+                            Text("Repeat on", style = MaterialTheme.typography.labelLarge)
+                            WeekdayChips(
+                                selected = selectedWeekdays,
+                                onSelected = { selectedWeekdays = it },
+                            )
+                        }
+
+                        RepeatPattern.MONTHLY -> {
+                            Text("On day ${dueAtMillis.asLocalDateTime().dayOfMonth}")
+                        }
+
+                        RepeatPattern.YEARLY -> {
+                            Text("On ${formatDate(dueAtMillis)}")
+                        }
+
+                        RepeatPattern.CUSTOM -> {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text("Every")
+                                OutlinedTextField(
+                                    value = customInterval,
+                                    onValueChange = {
+                                        if (it.all(Char::isDigit)) customInterval = it
+                                    },
+                                    modifier = Modifier.width(84.dp),
+                                    singleLine = true,
+                                )
+                                RepeatUnitPicker(
+                                    selected = customUnit,
+                                    onSelected = { customUnit = it },
+                                )
+                            }
+                            if (customUnit == RepeatUnit.WEEK) {
+                                Text("Repeat on", style = MaterialTheme.typography.labelLarge)
+                                WeekdayChips(
+                                    selected = selectedWeekdays,
+                                    onSelected = { selectedWeekdays = it },
+                                )
+                            }
+                            if (customUnit == RepeatUnit.MONTH) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text("On day")
+                                    OutlinedTextField(
+                                        value = customMonthDay,
+                                        onValueChange = {
+                                            if (it.all(Char::isDigit)) customMonthDay = it
+                                        },
+                                        modifier = Modifier.width(84.dp),
+                                        singleLine = true,
+                                    )
+                                }
+                            }
+                        }
+
+                        RepeatPattern.DAILY,
+                        RepeatPattern.WEEKDAYS,
+                        RepeatPattern.NONE,
+                        -> Unit
+                    }
+
+                    Text("Ends", style = MaterialTheme.typography.labelLarge)
+                    RepeatEndPicker(
+                        selected = repeatEndMode,
+                        onSelected = { repeatEndMode = it },
+                    )
+                    when (repeatEndMode) {
+                        RepeatEndMode.NEVER -> Unit
+                        RepeatEndMode.ON_DATE -> {
+                            Button(
+                                onClick = {
+                                    val current = repeatEndDateMillis.asLocalDateTime()
+                                    DatePickerDialog(
+                                        context,
+                                        { _, year, month, day ->
+                                            repeatEndDateMillis = LocalDate.of(year, month + 1, day)
+                                                .atStartOfDay(ZoneId.systemDefault())
+                                                .toInstant()
+                                                .toEpochMilli()
+                                        },
+                                        current.year,
+                                        current.monthValue - 1,
+                                        current.dayOfMonth,
+                                    ).apply { datePicker.minDate = dueAtMillis }.show()
+                                },
+                            ) { Text(formatDate(repeatEndDateMillis)) }
+                        }
+
+                        RepeatEndMode.AFTER_OCCURRENCES -> {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                OutlinedTextField(
+                                    value = repeatOccurrences,
+                                    onValueChange = {
+                                        if (it.all(Char::isDigit)) repeatOccurrences = it
+                                    },
+                                    modifier = Modifier.width(100.dp),
+                                    singleLine = true,
+                                )
+                                Text("occurrences")
+                            }
+                        }
+                    }
+                }
+                recurrenceError?.let { error ->
+                    Text(
+                        error,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
             }
         },
         confirmButton = {
@@ -615,13 +806,210 @@ private fun NewTodoDialog(
                     if (title.isBlank()) {
                         showTitleError = true
                     } else {
-                        onSave(title, dueAtMillis)
+                        runCatching {
+                            recurrenceFromSelection(
+                                pattern = repeatPattern,
+                                dueAtMillis = dueAtMillis,
+                                selectedWeekdays = selectedWeekdays,
+                                customUnit = customUnit,
+                                customInterval = customInterval,
+                                customMonthDay = customMonthDay,
+                                endMode = repeatEndMode,
+                                endDateMillis = repeatEndDateMillis,
+                                occurrences = repeatOccurrences,
+                            )
+                        }.fold(
+                            onSuccess = { recurrence -> onSave(title, dueAtMillis, recurrence) },
+                            onFailure = { error -> recurrenceError = error.message ?: "Invalid repeat settings" },
+                        )
                     }
                 },
             ) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+@Composable
+private fun RepeatPatternPicker(
+    selected: RepeatPattern,
+    onSelected: (RepeatPattern) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        Button(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+            Text(selected.label)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            RepeatPattern.values().forEach { pattern ->
+                DropdownMenuItem(
+                    text = { Text(pattern.label) },
+                    onClick = {
+                        expanded = false
+                        onSelected(pattern)
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RepeatUnitPicker(
+    selected: RepeatUnit,
+    onSelected: (RepeatUnit) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        Button(onClick = { expanded = true }) { Text(selected.label) }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            RepeatUnit.values().forEach { unit ->
+                DropdownMenuItem(
+                    text = { Text(unit.label) },
+                    onClick = {
+                        expanded = false
+                        onSelected(unit)
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RepeatEndPicker(
+    selected: RepeatEndMode,
+    onSelected: (RepeatEndMode) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        Button(onClick = { expanded = true }) { Text(selected.label) }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            RepeatEndMode.values().forEach { mode ->
+                DropdownMenuItem(
+                    text = { Text(mode.label) },
+                    onClick = {
+                        expanded = false
+                        onSelected(mode)
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WeekdayChips(
+    selected: Set<DayOfWeek>,
+    onSelected: (Set<DayOfWeek>) -> Unit,
+) {
+    Row(
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        DayOfWeek.values().forEach { day ->
+            FilterChip(
+                selected = day in selected,
+                onClick = {
+                    onSelected(
+                        if (day in selected) {
+                            if (selected.size == 1) selected else selected - day
+                        } else {
+                            selected + day
+                        },
+                    )
+                },
+                label = { Text(day.shortLabel()) },
+            )
+        }
+    }
+}
+
+private fun recurrenceFromSelection(
+    pattern: RepeatPattern,
+    dueAtMillis: Long,
+    selectedWeekdays: Set<DayOfWeek>,
+    customUnit: RepeatUnit,
+    customInterval: String,
+    customMonthDay: String,
+    endMode: RepeatEndMode,
+    endDateMillis: Long,
+    occurrences: String,
+): RecurrenceRule? {
+    if (pattern == RepeatPattern.NONE) return null
+
+    val dueDate = dueAtMillis.asLocalDateTime().toLocalDate()
+    val end = when (endMode) {
+        RepeatEndMode.NEVER -> RecurrenceEnd.Never
+        RepeatEndMode.ON_DATE -> RecurrenceEnd.On(
+            endDateMillis.asLocalDateTime().toLocalDate().also {
+                require(!it.isBefore(dueDate)) { "The end date must be on or after the due date" }
+            },
+        )
+
+        RepeatEndMode.AFTER_OCCURRENCES -> RecurrenceEnd.After(
+            occurrences.toIntOrNull()?.also {
+                require(it > 0) { "Occurrences must be greater than zero" }
+            } ?: error("Enter a valid number of occurrences"),
+        )
+    }
+
+    return when (pattern) {
+        RepeatPattern.DAILY -> RecurrenceRule(RecurrenceFrequency.DAILY, end = end)
+        RepeatPattern.WEEKLY -> RecurrenceRule(
+            frequency = RecurrenceFrequency.WEEKLY,
+            daysOfWeek = selectedWeekdays,
+            end = end,
+        )
+
+        RepeatPattern.MONTHLY -> RecurrenceRule(
+            frequency = RecurrenceFrequency.MONTHLY,
+            dayOfMonth = dueDate.dayOfMonth,
+            end = end,
+        )
+
+        RepeatPattern.YEARLY -> RecurrenceRule(
+            frequency = RecurrenceFrequency.YEARLY,
+            dayOfMonth = dueDate.dayOfMonth,
+            monthOfYear = dueDate.monthValue,
+            end = end,
+        )
+
+        RepeatPattern.WEEKDAYS -> RecurrenceRule(RecurrenceFrequency.WEEKDAYS, end = end)
+        RepeatPattern.CUSTOM -> {
+            val interval = customInterval.toIntOrNull()?.also {
+                require(it > 0) { "The repeat interval must be greater than zero" }
+            } ?: error("Enter a valid repeat interval")
+            when (customUnit) {
+                RepeatUnit.DAY -> RecurrenceRule(RecurrenceFrequency.DAILY, interval, end = end)
+                RepeatUnit.WEEK -> RecurrenceRule(
+                    frequency = RecurrenceFrequency.WEEKLY,
+                    interval = interval,
+                    daysOfWeek = selectedWeekdays,
+                    end = end,
+                )
+
+                RepeatUnit.MONTH -> RecurrenceRule(
+                    frequency = RecurrenceFrequency.MONTHLY,
+                    interval = interval,
+                    dayOfMonth = customMonthDay.toIntOrNull()?.also {
+                        require(it in 1..31) { "The monthly day must be from 1 to 31" }
+                    } ?: error("Enter a valid monthly day"),
+                    end = end,
+                )
+
+                RepeatUnit.YEAR -> RecurrenceRule(
+                    frequency = RecurrenceFrequency.YEARLY,
+                    interval = interval,
+                    dayOfMonth = dueDate.dayOfMonth,
+                    monthOfYear = dueDate.monthValue,
+                    end = end,
+                )
+            }
+        }
+
+        RepeatPattern.NONE -> null
+    }
 }
 
 private val dueDateFormatter = DateTimeFormatter.ofPattern("EEE, MMM d, yyyy")

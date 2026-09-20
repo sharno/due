@@ -41,10 +41,10 @@ class TodoViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun add(title: String, dueAtMillis: Long) {
+    fun add(title: String, dueAtMillis: Long, recurrence: RecurrenceRule?) {
         require(title.isNotBlank()) { "A todo needs a title" }
         viewModelScope.launch {
-            repository.add(Todo.create(title, dueAtMillis))
+            repository.add(Todo.create(title, dueAtMillis, recurrence))
         }
     }
 

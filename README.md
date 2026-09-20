@@ -29,6 +29,10 @@ confirmation. Re-select the cloud file and configure automatic backup after
 restoring the app on another device. Android backup includes the todo database
 and app settings, but uninstalling the app still removes its local data.
 
+New tasks default to **Does not repeat**. The repeat picker also supports daily,
+weekly selections across multiple weekdays, monthly dates, annual dates,
+weekdays, custom intervals, and optional end dates or occurrence counts.
+
 ## F-Droid
 
 Due is designed for F-Droid: it is fully offline and contains no network
