@@ -110,7 +110,7 @@ object TaskScheduler {
         overdue.forEach { todo ->
             val notification = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
-                .setContentTitle("Overdue: ${todo.title}")
+                .setContentTitle(todo.title)
                 .setContentText("Due ${formatDueAt(todo.dueAtMillis)}")
                 .setStyle(NotificationCompat.BigTextStyle().bigText(taskLine(todo)))
                 .setContentIntent(openAppPendingIntent(context))

@@ -9,7 +9,7 @@ before it is proposed upstream.
 ## Completed readiness work
 
 - GPL-3.0-or-later source license.
-- Public, tagged source release: [`v1.3.0`](https://github.com/sharno/due/tree/v1.3.0).
+- Public, tagged source release: [`v1.3.1`](https://github.com/sharno/due/tree/v1.3.1).
 - Upstream Fastlane title, descriptions, changelog, and 512×512 PNG icon.
 - Offline-only source with no account, ads, analytics, tracking, network
   service, proprietary SDK, or bundled binary dependency.
