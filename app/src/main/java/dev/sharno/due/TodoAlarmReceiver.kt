@@ -25,7 +25,7 @@ class TodoAlarmReceiver : BroadcastReceiver() {
                     val taskId = requireNotNull(intent.getStringExtra(TaskScheduler.EXTRA_TASK_ID)) {
                         "Complete action did not include a task id"
                     }
-                    repository.setCompleted(taskId, true)
+                    repository.setCompleted(taskId, true, CompletionSource.NOTIFICATION)
                 }
                 TaskScheduler.synchronize(context)
             } finally {

@@ -1,0 +1,4 @@
+<resources>
+    <!-- Surface tone of the default seed's light scheme; only ever seen before Compose draws. -->
+    <color name="window_background">#FFFCF8F6</color>
+</resources>
