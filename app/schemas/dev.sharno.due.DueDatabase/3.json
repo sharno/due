@@ -1,0 +1,325 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 3,
+    "identityHash": "d37e15e3202f2f8feee6d9701338e126",
+    "entities": [
+      {
+        "tableName": "todos",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `dueAtMillis` INTEGER NOT NULL, `completed` INTEGER NOT NULL, `recurrence` TEXT, `occurrencesCompleted` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dueAtMillis",
+            "columnName": "dueAtMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "completed",
+            "columnName": "completed",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recurrence",
+            "columnName": "recurrence",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "occurrencesCompleted",
+            "columnName": "occurrencesCompleted",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "skills",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `nameKey` TEXT NOT NULL, `colorArgb` INTEGER NOT NULL, `createdAtMillis` INTEGER NOT NULL, `archivedAtMillis` INTEGER, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nameKey",
+            "columnName": "nameKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "colorArgb",
+            "columnName": "colorArgb",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtMillis",
+            "columnName": "createdAtMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "archivedAtMillis",
+            "columnName": "archivedAtMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_skills_nameKey",
+            "unique": true,
+            "columnNames": [
+              "nameKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_skills_nameKey` ON `${TABLE_NAME}` (`nameKey`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "todo_skills",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`todoId` TEXT NOT NULL, `skillId` TEXT NOT NULL, PRIMARY KEY(`todoId`, `skillId`), FOREIGN KEY(`todoId`) REFERENCES `todos`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`skillId`) REFERENCES `skills`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "todoId",
+            "columnName": "todoId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "skillId",
+            "columnName": "skillId",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "todoId",
+            "skillId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_todo_skills_skillId",
+            "unique": false,
+            "columnNames": [
+              "skillId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_todo_skills_skillId` ON `${TABLE_NAME}` (`skillId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "todos",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "todoId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "skills",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "skillId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "task_completions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `todoId` TEXT NOT NULL, `taskTitle` TEXT NOT NULL, `occurrenceIndex` INTEGER NOT NULL, `completedAtMillis` INTEGER NOT NULL, `ratingPromptedAtMillis` INTEGER, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "todoId",
+            "columnName": "todoId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "taskTitle",
+            "columnName": "taskTitle",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "occurrenceIndex",
+            "columnName": "occurrenceIndex",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "completedAtMillis",
+            "columnName": "completedAtMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ratingPromptedAtMillis",
+            "columnName": "ratingPromptedAtMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_task_completions_todoId",
+            "unique": false,
+            "columnNames": [
+              "todoId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_task_completions_todoId` ON `${TABLE_NAME}` (`todoId`)"
+          },
+          {
+            "name": "index_task_completions_completedAtMillis",
+            "unique": false,
+            "columnNames": [
+              "completedAtMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_task_completions_completedAtMillis` ON `${TABLE_NAME}` (`completedAtMillis`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "skill_ratings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`completionId` TEXT NOT NULL, `skillId` TEXT NOT NULL, `rating` INTEGER NOT NULL, `ratedAtMillis` INTEGER NOT NULL, PRIMARY KEY(`completionId`, `skillId`), FOREIGN KEY(`completionId`) REFERENCES `task_completions`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`skillId`) REFERENCES `skills`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "completionId",
+            "columnName": "completionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "skillId",
+            "columnName": "skillId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rating",
+            "columnName": "rating",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ratedAtMillis",
+            "columnName": "ratedAtMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "completionId",
+            "skillId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_skill_ratings_skillId",
+            "unique": false,
+            "columnNames": [
+              "skillId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_skill_ratings_skillId` ON `${TABLE_NAME}` (`skillId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "task_completions",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "completionId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "skills",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "skillId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'd37e15e3202f2f8feee6d9701338e126')"
+    ]
+  }
+}

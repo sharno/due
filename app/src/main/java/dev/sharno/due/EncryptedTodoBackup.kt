@@ -31,11 +31,11 @@ object EncryptedTodoBackup {
     private const val IV_BYTES = 12
     private const val TAG_BITS = 128
 
-    fun encode(todos: List<Todo>, passphrase: String): String {
+    fun encode(snapshot: DueSnapshot, passphrase: String): String {
         require(passphrase.isNotEmpty()) { "A backup passphrase is required" }
         val salt = ByteArray(SALT_BYTES).also(SecureRandom()::nextBytes)
         val iv = ByteArray(IV_BYTES).also(SecureRandom()::nextBytes)
-        val plaintext = TodoBackup.encode(todos).toByteArray(StandardCharsets.UTF_8)
+        val plaintext = TodoBackup.encode(snapshot).toByteArray(StandardCharsets.UTF_8)
         val ciphertext = cipher(Cipher.ENCRYPT_MODE, passphrase, salt, iv).doFinal(plaintext)
 
         return JSONObject()
@@ -49,7 +49,7 @@ object EncryptedTodoBackup {
             .toString(2)
     }
 
-    fun decode(raw: String, passphrase: String): List<Todo> {
+    fun decode(raw: String, passphrase: String): DueSnapshot {
         require(passphrase.isNotEmpty()) { "A backup passphrase is required" }
         val root = JSONObject(raw)
         require(root.getString("format") == FORMAT) { "This is not an encrypted Due backup" }
@@ -72,7 +72,7 @@ object EncryptedTodoBackup {
         } catch (error: GeneralSecurityException) {
             throw IllegalArgumentException("Unable to decrypt backup", error)
         }
-        return TodoBackup.decode(String(plaintext, StandardCharsets.UTF_8))
+        return TodoBackup.decodeSnapshot(String(plaintext, StandardCharsets.UTF_8))
     }
 
     private fun cipher(mode: Int, passphrase: String, salt: ByteArray, iv: ByteArray): Cipher {

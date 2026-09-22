@@ -46,6 +46,13 @@ android {
     }
 
     buildTypes {
+        debug {
+            // A locally built dev copy is signed with the debug key, so it cannot replace an
+            // installed release build. The suffix lets both sit on the device at once.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
+
         release {
             isMinifyEnabled = false
             // AGP otherwise embeds the checkout path and revision in the APK.

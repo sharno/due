@@ -1,9 +1,10 @@
 <resources>
-    <style name="Theme.Due" parent="android:style/Theme.Material.Light.NoActionBar">
+    <!-- The platform has no Theme.Material.DayNight, so the dark parent needs its own file. -->
+    <style name="Theme.Due" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowBackground">@color/window_background</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

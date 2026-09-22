@@ -1,0 +1,4 @@
+<resources>
+    <!-- Distinguishes the dev build from an installed release build in the launcher. -->
+    <string name="app_name">Due (dev)</string>
+</resources>

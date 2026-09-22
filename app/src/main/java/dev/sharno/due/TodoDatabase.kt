@@ -12,6 +12,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.Update
 import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
@@ -39,6 +40,14 @@ interface TodoDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(todos: List<TodoEntity>)
 
+    /**
+     * Updates must not go through `@Insert(REPLACE)`. SQLite implements REPLACE as delete-then-insert
+     * and those deletes fire `ON DELETE` foreign-key actions, so re-inserting a todo would silently
+     * cascade away everything that references it.
+     */
+    @Update
+    suspend fun update(todo: TodoEntity)
+
     @Query("SELECT * FROM todos WHERE id = :taskId")
     suspend fun byId(taskId: String): TodoEntity?
 
@@ -50,12 +59,26 @@ interface TodoDao {
 }
 
 @Database(
-    entities = [TodoEntity::class],
-    version = 2,
+    entities = [
+        TodoEntity::class,
+        SkillEntity::class,
+        TodoSkillEntity::class,
+        TaskCompletionEntity::class,
+        SkillRatingEntity::class,
+    ],
+    version = 3,
     exportSchema = true,
 )
 abstract class DueDatabase : RoomDatabase() {
     abstract fun todoDao(): TodoDao
+
+    abstract fun skillDao(): SkillDao
+
+    abstract fun todoSkillDao(): TodoSkillDao
+
+    abstract fun taskCompletionDao(): TaskCompletionDao
+
+    abstract fun skillRatingDao(): SkillRatingDao
 
     companion object {
         private const val DATABASE_NAME = "due.db"
@@ -64,6 +87,12 @@ abstract class DueDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE todos ADD COLUMN recurrence TEXT")
                 db.execSQL("ALTER TABLE todos ADD COLUMN occurrencesCompleted INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                MIGRATION_2_3_STATEMENTS.forEach(db::execSQL)
             }
         }
 
@@ -76,13 +105,33 @@ abstract class DueDatabase : RoomDatabase() {
                 DueDatabase::class.java,
                 DATABASE_NAME,
             )
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .addCallback(LegacyTodoMigration(context.applicationContext))
                 .build()
                 .also { instance = it }
         }
     }
 }
+
+/**
+ * The v3 tables, copied verbatim from the schema Room generates at
+ * `app/schemas/dev.sharno.due.DueDatabase/3.json`.
+ *
+ * Room validates the live database structurally against the compiled entities, and there is no
+ * `fallbackToDestructiveMigration` here — a mismatch is a crash on launch for every existing user,
+ * not a silent reset. `SchemaMigrationSqlTest` pins these strings against the committed schema.
+ */
+internal val MIGRATION_2_3_STATEMENTS: List<String> = listOf(
+    "CREATE TABLE IF NOT EXISTS `skills` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `nameKey` TEXT NOT NULL, `colorArgb` INTEGER NOT NULL, `createdAtMillis` INTEGER NOT NULL, `archivedAtMillis` INTEGER, PRIMARY KEY(`id`))",
+    "CREATE UNIQUE INDEX IF NOT EXISTS `index_skills_nameKey` ON `skills` (`nameKey`)",
+    "CREATE TABLE IF NOT EXISTS `todo_skills` (`todoId` TEXT NOT NULL, `skillId` TEXT NOT NULL, PRIMARY KEY(`todoId`, `skillId`), FOREIGN KEY(`todoId`) REFERENCES `todos`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`skillId`) REFERENCES `skills`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+    "CREATE INDEX IF NOT EXISTS `index_todo_skills_skillId` ON `todo_skills` (`skillId`)",
+    "CREATE TABLE IF NOT EXISTS `task_completions` (`id` TEXT NOT NULL, `todoId` TEXT NOT NULL, `taskTitle` TEXT NOT NULL, `occurrenceIndex` INTEGER NOT NULL, `completedAtMillis` INTEGER NOT NULL, `ratingPromptedAtMillis` INTEGER, PRIMARY KEY(`id`))",
+    "CREATE INDEX IF NOT EXISTS `index_task_completions_todoId` ON `task_completions` (`todoId`)",
+    "CREATE INDEX IF NOT EXISTS `index_task_completions_completedAtMillis` ON `task_completions` (`completedAtMillis`)",
+    "CREATE TABLE IF NOT EXISTS `skill_ratings` (`completionId` TEXT NOT NULL, `skillId` TEXT NOT NULL, `rating` INTEGER NOT NULL, `ratedAtMillis` INTEGER NOT NULL, PRIMARY KEY(`completionId`, `skillId`), FOREIGN KEY(`completionId`) REFERENCES `task_completions`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`skillId`) REFERENCES `skills`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+    "CREATE INDEX IF NOT EXISTS `index_skill_ratings_skillId` ON `skill_ratings` (`skillId`)",
+)
 
 private class LegacyTodoMigration(private val context: Context) : RoomDatabase.Callback() {
     override fun onCreate(db: SupportSQLiteDatabase) {
